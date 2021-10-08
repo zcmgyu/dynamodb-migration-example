@@ -1,17 +1,27 @@
-const up = (item) => {
-  const { status, ...rest } = item;
-  return {
-    ...rest,
-    Status: status,
-  };
+const { TABLE_NAME } = require("../scripts/dynamodb");
+
+const up = async (item, DB) => {
+  if (item.PK.startsWith('Car')) {
+    await DB.put({
+      TableName: TABLE_NAME,
+      Item: {
+        ...item,
+        Name: item.Name + ' updated',
+      },
+    }).promise()
+  }
 }
 
-const down = (item) => {
-  const { Status, ...rest } = item;
-  return {
-    ...rest,
-    status: Status,
-  };
+const down = async (item, DB) => {
+  if (item.PK.startsWith('Car')) {
+    await DB.put({
+      TableName: TABLE_NAME,
+      Item: {
+        ...item,
+        Name: item.Name.slice(0, -' updated'.length),
+      },
+    }).promise()
+  }
 }
 
 module.exports = {

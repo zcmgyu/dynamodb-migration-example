@@ -1,76 +1,72 @@
-const DynamoDB = require('aws-sdk/clients/dynamodb');
+const { DocumentClient, TABLE_NAME } = require("./dynamodb");
 
-const applyUpdateToAllUsers = async (updateFn) => {
-  const db = new DynamoDB.DocumentClient();
+const scanDB = async (updateFn) => {
+  const DB = new DocumentClient();
   let lastEvalKey;
   do {
-    const { Items, LastEvaluatedKey } = await db.scan({
-      TableName: process.env.DYNAMODB_TABLE_NAME,
-      FilterExpression: 'begins_with(RecordId, :x)',
+    const { Items, LastEvaluatedKey } = await DB.scan({
+      TableName: TABLE_NAME,
       ExclusiveStartKey: lastEvalKey,
-      ExpressionAttributeValues: {
-        ':x': 'User:'
-      }
     }).promise();
     lastEvalKey = LastEvaluatedKey;
-    const updatedItems = Items.map(updateFn);
-    await Promise.all(updatedItems.map((item) =>
-      db.put({
-        TableName: process.env.DYNAMODB_TABLE_NAME,
-        Item: item,
-      }).promise()
-    ));
-  } while(lastEvalKey)
+    await Promise.all(Items.map((item) => updateFn(item, DB)));
+  } while (lastEvalKey)
 }
 
 const checkForMigrationSequence = async (sequence) => {
-  const db = new DynamoDB.DocumentClient();
+  const db = new DocumentClient();
   const { Item } = await db.get({
-    TableName: process.env.DYNAMODB_TABLE_NAME,
+    TableName: TABLE_NAME,
     Key: {
-      RecordId: 'Migrations'
+      PK: 'migration',
+      SK: 'meta',
     },
   }).promise();
-  return Item && Object.values(Item.Batches).reduce((acc, val) => acc.concat(val), []).includes(sequence);
+  return Item && Object.values(Item.__batches)
+    .reduce((acc, val) => acc.concat(val), [])
+    .includes(sequence);
 }
 
 const setMigrationIsRun = async (batch, sequence) => {
-  const db = new DynamoDB.DocumentClient();
+  const db = new DocumentClient();
   const { Item } = await db.get({
-    TableName: process.env.DYNAMODB_TABLE_NAME,
+    TableName: TABLE_NAME,
     Key: {
-      RecordId: 'Migrations'
+      PK: 'migration',
+      SK: 'meta',
     },
   }).promise();
-  const existingBatches = Item ? Item.Batches : {};
+  const existingBatches = Item ? Item.__batches : {};
   const batchToUpdate = existingBatches[batch] || [];
   batchToUpdate.push(sequence);
   const updatedItem = {
     ...Item,
-    RecordId: 'Migrations',
-    Batches: {
+    PK: 'migration',
+    SK: 'meta',
+    __batches: {
       ...existingBatches,
       [batch]: batchToUpdate,
     }
   }
   await db.put({
-    TableName: process.env.DYNAMODB_TABLE_NAME,
+    TableName: TABLE_NAME,
     Item: updatedItem,
   }).promise()
 }
 
 const removeSequenceFromBatch = async (batchNumber, sequence) => {
-  const db = new DynamoDB.DocumentClient();
+  const db = new DocumentClient();
   const { Item } = await db.get({
-    TableName: process.env.DYNAMODB_TABLE_NAME,
+    TableName: TABLE_NAME,
     Key: {
-      RecordId: 'Migrations'
+      PK: 'migration',
+      SK: 'meta',
     },
   }).promise();
   if (!Item) {
     return;
   }
-  const sequences = Item.Batches[`${batchNumber}`];
+  const sequences = Item.__batches[`${batchNumber}`];
   const index = sequences.indexOf(sequence);
   if (index > -1) {
     sequences.splice(index, 1);
@@ -80,61 +76,65 @@ const removeSequenceFromBatch = async (batchNumber, sequence) => {
   } else {
     const updatedItem = {
       ...Item,
-      RecordId: 'Migrations',
-      Batches: {
-        ...Item.Batches,
+      PK: 'migration',
+      SK: 'meta',
+      __batches: {
+        ...Item.__batches,
         [batchNumber]: sequences,
       }
     };
     await db.put({
-      TableName: process.env.DYNAMODB_TABLE_NAME,
+      TableName: TABLE_NAME,
       Item: updatedItem,
     }).promise();
   }
 };
 
 const getLatestBatch = async () => {
-  const db = new DynamoDB.DocumentClient();
+  const db = new DocumentClient();
   const { Item } = await db.get({
-    TableName: process.env.DYNAMODB_TABLE_NAME,
+    TableName: TABLE_NAME,
     Key: {
-      RecordId: 'Migrations'
+      PK: 'migration',
+      SK: 'meta'
     },
   }).promise();
-  if (!Item) {
+  if (!Item || !Item.__batches) {
     return;
   }
-  const batches = Object.keys(Item.Batches).map((x) => parseInt(x, 10)).sort().reverse();
+  const batches = Object.keys(Item.__batches).map((x) => parseInt(x, 10)).sort().reverse();
   const latestBatchNumber = batches[0];
   if (!latestBatchNumber) {
     return;
   }
   return {
     batchNumber: latestBatchNumber,
-    sequences: Item.Batches[latestBatchNumber],
+    sequences: Item.__batches[latestBatchNumber],
   }
 };
 
 const removeBatch = async (batch) => {
-  const db = new DynamoDB.DocumentClient();
+  const db = new DocumentClient();
   const { Item } = await db.get({
-    TableName: process.env.DYNAMODB_TABLE_NAME,
+    TableName: TABLE_NAME,
     Key: {
-      RecordId: 'Migrations'
+      PK: 'migration',
+      SK: 'meta'
     },
   }).promise();
   if (!Item) {
     return;
   }
-  const currentBatches = Item.Batches;
+  const currentBatches = Item.__batches;
   delete currentBatches[`${batch}`];
   const updatedItem = {
     ...Item,
-    RecordId: 'Migrations',
-    Batches: currentBatches
+    PK: 'migration',
+    SK: 'meta',
+    __batches: currentBatches
   };
   await db.put({
-    TableName: process.env.DYNAMODB_TABLE_NAME,
+    TableName: TABLE_NAME,
     Item: updatedItem,
   }).promise();
 }
@@ -142,13 +142,13 @@ const removeBatch = async (batch) => {
 const migrate = async (batch, sequence, updateFn) => {
   const isMigrationRun = await checkForMigrationSequence(sequence);
   if (!isMigrationRun) {
-    await applyUpdateToAllUsers(updateFn);
+    await scanDB(updateFn);
     await setMigrationIsRun(batch, sequence);
   }
 }
 
 const revert = async (updateFn) => {
-  await applyUpdateToAllUsers(updateFn);
+  await scanDB(updateFn);
 }
 
 module.exports = {

@@ -14,10 +14,7 @@
   },
   "homepage": "https://github.com/theandypeterson/dynamodb-migration-example#readme",
   "scripts": {
-    "test": "node scripts/index.js",
     "seed": "node scripts/seed-users.js",
-    "clear": "node scripts/clear-all.js",
-    "reset": "yarn clear && yarn seed",
     "migrate": "node scripts/migrate.js",
     "rollback": "node scripts/rollback.js",
     "up": "node scripts/up.js",
@@ -27,8 +24,8 @@
     "upload": "aws lambda update-function-code --function-name connect --zip-file fileb://dist/connect.zip --region ca-central-1 && aws lambda update-function-code --function-name disconnect --zip-file fileb://dist/disconnect.zip --region ca-central-1 && aws lambda update-function-code --function-name dynamoTrigger --zip-file fileb://dist/trigger.zip --region ca-central-1"
   },
   "dependencies": {
-    "aws-sdk": "^2.768.0",
-    "node": "^14.13.0",
-    "wscat": "^4.0.1"
+    "aws-sdk": "^2.1002.0",
+    "dotenv": "^10.0.0",
+    "node": "^14.13.0"
   }
 }

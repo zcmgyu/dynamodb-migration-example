@@ -1,26 +1,35 @@
-const DynamoDB = require('aws-sdk/clients/dynamodb');
+const { DocumentClient, TABLE_NAME } = require('./dynamodb');
 
-const times = (x, fn) => Array.from(Array(x).keys()).map(fn);
+const times = (x, fn) => Array.from(Array(x).keys()).flatMap(fn);
 
 const run = async () => {
-  const db = new DynamoDB.DocumentClient();
+  const db = new DocumentClient();
   await Promise.all(times(10, (i) =>
-    db.put({
-      TableName: process.env.DYNAMODB_TABLE_NAME,
+    [db.put({
+      TableName: TABLE_NAME,
       Item: {
-        RecordId: `User:${i}`,
+        PK: `User:${i}`,
+        SK: 'meta',
         Name: `User Name ${i}`,
       }
-    }).promise()
+    }).promise(),
+    db.put({
+      TableName: TABLE_NAME,
+      Item: {
+        PK: `Car:${i}`,
+        SK: 'meta',
+        Name: `Car Name ${i}`,
+      }
+    }).promise()]
   ))
 }
 
 const main = () => {
   return run().then(() => {
-    console.info('success');
+    console.info('Success');
     process.exit(0);
   }).catch((e) => {
-    console.error('error: ', e);
+    console.error('Error: ', e);
     process.exit(1);
   });
 }
